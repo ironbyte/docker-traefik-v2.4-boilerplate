@@ -1,0 +1,127 @@
+version: '3.8'
+services:
+  traefik:
+    image: traefik:v2.4
+    command:
+      #############################################
+      ### Static Traefik V2 Configuration (CLI) ###
+      #############################################
+
+      ## Log settings
+      - '--log.level=INFO'
+      - '--log.format=json'
+
+      ## Provider Settings
+      - '--providers.docker=true'
+      - '--providers.docker.network=traefik_proxy'
+      - '--providers.docker.exposedbydefault=false'
+      - '--providers.file.filename=/traefik-config/dynamic.yml'
+      - '--providers.file.watch=true'
+
+      ## Entrypoints Settings
+      - '--entrypoints.web.address=:80'
+      - '--entrypoints.websecure.address=:443'
+      - '--entryPoints.ping.address=:8082'
+
+      ## Global HTTP to HTTPS redirection
+      - '--entrypoints.web.http.redirections.entrypoint.to=websecure'
+      - '--entrypoints.web.http.redirections.entrypoint.scheme=https'
+
+      ## Let's Encrypt Certificate Settings
+      - '--certificatesresolvers.lets-encrypt.acme.tlschallenge=true' # <======= Enable TLS-ALPN-01 to generate and renew ACME certificates
+      # - '--certificatesresolvers.lets-encrypt.acme.caServer=https://acme-staging-v02.api.letsencrypt.org/directory'
+      - '--certificatesresolvers.lets-encrypt.acme.email=${ACME_EMAIL}'
+      - '--certificatesresolvers.lets-encrypt.acme.storage=/letsencrypt/acme.json'
+      # - '--certificatesresolvers.lets-encrypt.acme.keyType="EC384"'# <======= ECC certificate generation is currently not supported by Let's Encrypt
+
+      ## API Settings
+      - '--api.dashboard=true'
+      - '--api.debug=true'
+
+      ## Ping Settings
+      - '--ping.entryPoint=ping'
+
+    container_name: 'traefik-v2'
+    volumes:
+      - './traefik-config/dynamic.yml:/traefik-config/dynamic.yml'
+      - './letsencrypt:/letsencrypt'
+      - './.htpasswd:/.htpasswd'
+      - '/var/run/docker.sock:/var/run/docker.sock:ro'
+    ports:
+      - '443:443'
+      - '80:80'
+    networks:
+      - 'traefik_proxy'
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.docker.network=traefik_proxy'
+
+      - 'traefik.http.routers.traefik-secured.entrypoints=websecure'
+      - 'traefik.http.routers.traefik-secured.middlewares=basic-auth-secured@file'
+      - 'traefik.http.routers.traefik-secured.rule=Host(`traefik.${ACME_DOMAIN_NAME}`)'
+      - 'traefik.http.routers.traefik-secured.service=api@internal'
+      - 'traefik.http.routers.traefik-secured.tls.certresolver=lets-encrypt'
+      - 'traefik.http.routers.traefik-secured.tls.options=mintls12@file'
+
+    restart: 'unless-stopped'
+    security_opt:
+      - 'no-new-privileges:true'
+    healthcheck:
+      test: 'wget --quiet --spider http://localhost:8082/ping || exit 1'
+      interval: '30s'
+      timeout: '3s'
+      start_period: '5s'
+      retries: 3
+  portainer-ce:
+    image: 'portainer/portainer-ce'
+    container_name: 'portainer-ce'
+    depends_on:
+      - 'traefik'
+    volumes:
+      - '/var/run/docker.sock:/var/run/docker.sock'
+      - 'portainer_data:/data'
+    expose:
+      - '9000'
+    networks:
+      - 'traefik_proxy'
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.docker.network=traefik_proxy'
+
+      - 'traefik.http.routers.portainer-secured.entrypoints=websecure'
+      - 'traefik.http.routers.portainer-secured.middlewares=no-auth-secured@file'
+      - 'traefik.http.routers.portainer-secured.rule=Host(`portainer.${ACME_DOMAIN_NAME}`)'
+      - 'traefik.http.routers.portainer-secured.tls.certresolver=lets-encrypt'
+      - 'traefik.http.routers.portainer-secured.tls.options=mintls12@file'
+
+      - 'traefik.http.services.portainer-ce.loadbalancer.server.port=9000'
+
+    restart: 'unless-stopped'
+    security_opt:
+      - 'no-new-privileges:true'
+  whoami:
+    image: 'traefik/whoami'
+    container_name: traefik-whoami
+    depends_on:
+      - 'traefik'
+    networks:
+      - 'traefik_proxy'
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.docker.network=traefik_proxy'
+
+      - 'traefik.http.routers.whoami-secured.entrypoints=websecure'
+      - 'traefik.http.routers.whoami-secured.middlewares=no-auth-secured@file'
+      - 'traefik.http.routers.whoami-secured.rule=Host(`whoami.${ACME_DOMAIN_NAME}`)'
+      - 'traefik.http.routers.whoami-secured.tls.certresolver=lets-encrypt'
+      - 'traefik.http.routers.whoami-secured.tls.options=mintls12@file'
+
+    restart: 'unless-stopped'
+    security_opt:
+      - 'no-new-privileges:true'
+volumes:
+  portainer_data:
+    external: true
+networks:
+  traefik_proxy:
+    external: true

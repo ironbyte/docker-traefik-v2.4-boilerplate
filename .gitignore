@@ -1,0 +1,17 @@
+### dotenv ###
+.env
+.env.old
+
+### vscode ###
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+### htpasswd ###
+.htpasswd*
+
+### acme ###
+acme*.json*
